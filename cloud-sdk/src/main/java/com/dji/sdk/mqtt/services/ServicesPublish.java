@@ -3,7 +3,9 @@ package com.dji.sdk.mqtt.services;
 import com.dji.sdk.common.Common;
 import com.dji.sdk.mqtt.MqttGatewayPublish;
 import com.dji.sdk.mqtt.TopicConst;
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.JavaType;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.stereotype.Component;
 
@@ -98,12 +100,36 @@ public class ServicesPublish {
         // put together in "output"
         ObjectMapper mapper = Common.getObjectMapper();
         if (Objects.nonNull(replyReceiver.getInfo())) {
-            reply.setOutput(mapper.convertValue(replyReceiver.getInfo(), clazz));
+            reply.setOutput(convertReplyField(mapper, replyReceiver.getInfo(), clazz));
         }
         if (Objects.nonNull(replyReceiver.getOutput())) {
-            reply.setOutput(mapper.convertValue(replyReceiver.getOutput(), clazz));
+            reply.setOutput(convertReplyField(mapper, replyReceiver.getOutput(), clazz));
         }
         return response.setData(reply);
+    }
+
+    /**
+     * Device {@code services_reply} may return {@code info}/{@code output} as a JSON object while the
+     * caller expects {@link String} (e.g. {@code live_start_push}). Plain {@code convertValue} then
+     * throws {@code MismatchedInputException}. Serialize structured values to a JSON string instead.
+     */
+    @SuppressWarnings("unchecked")
+    private static <T> T convertReplyField(ObjectMapper mapper, Object source, TypeReference<T> clazz) {
+        if (source == null) {
+            return null;
+        }
+        JavaType targetType = mapper.getTypeFactory().constructType(clazz);
+        if (targetType.hasRawClass(String.class)) {
+            if (source instanceof String) {
+                return (T) source;
+            }
+            try {
+                return (T) mapper.writeValueAsString(source);
+            } catch (JsonProcessingException e) {
+                throw new IllegalArgumentException("Failed to serialize MQTT services reply field to String", e);
+            }
+        }
+        return mapper.convertValue(source, clazz);
     }
 
 }
